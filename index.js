@@ -7,6 +7,7 @@ import { connectDB } from './db.js'; // Import DB functions
 import { User, Message } from './models.js';
 import bodyParser from 'body-parser';
 import messagesRoute from './routes/messages.js';
+import usersRoute from './routes/users.js';
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -16,14 +17,21 @@ const ADMIN = "Admin"
 
 const app = express()
 
+const corsOption = {
+    origin: ['http://localhost:3000', "http://localhost:5500", "http://127.0.0.1:5500", "http://localhost:5173"],
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE"],
+}
+
+app.use(cors(corsOption));
 app.use(express.static(path.join(__dirname, "public")))
 app.use(express.json());
-app.use(cors());
 app.use(bodyParser.urlencoded ({
     extended: true
 }));
-app.use('/api/messages', messagesRoute);
 
+app.use('/api/messages', messagesRoute);
+app.use('/api/users', usersRoute);
 
 
 const expressServer = app.listen(PORT, async () => {
@@ -48,6 +56,8 @@ io.on('connection', socket => {
     socket.emit('message', buildMsg(ADMIN, "Welcome to Chat App!"))
 
     socket.on('enterRoom', async ({ name, room, userId }) => {
+        console.log("enterRoom 11111111111111111111111111");
+        
         // Lấy phòng trước đó của người dùng
         let existedUser = await getUser(userId);
 
@@ -80,21 +90,23 @@ io.on('connection', socket => {
             io.emit('roomList', { rooms });
     
         } else {
-            // Tạo người dùng mới
-            const user = await activateUser(userId, name, room);
-            // Người dùng tham gia phòng mới
-            socket.join(user.room);
-            // Thông báo cho người dùng đã tham gia
-            socket.emit('message', buildMsg(ADMIN, `You have joined the ${user.room} chat room`));
-            // Thông báo cho tất cả mọi người khác
-            socket.broadcast.to(user.room).emit('message', buildMsg(ADMIN, `${user.name} has joined the room`));
-            // Cập nhật danh sách người dùng cho phòng mới
-            const usersInNewRoom = await getUsersInRoom(user.room);
-            io.to(user.room).emit('userList', { users: usersInNewRoom });
-        
-            // Cập nhật danh sách phòng cho tất cả mọi người
-            const rooms = await getAllActiveRooms();
-            io.emit('roomList', { rooms });
+            if(userId && name && room) {
+                // Tạo người dùng mới
+                const user = await activateUser(userId, name, room);
+                // Người dùng tham gia phòng mới
+                socket.join(user.room);
+                // Thông báo cho người dùng đã tham gia
+                socket.emit('message', buildMsg(ADMIN, `You have joined the ${user.room} chat room`));
+                // Thông báo cho tất cả mọi người khác
+                socket.broadcast.to(user.room).emit('message', buildMsg(ADMIN, `${user.name} has joined the room`));
+                // Cập nhật danh sách người dùng cho phòng mới
+                const usersInNewRoom = await getUsersInRoom(user.room);
+                io.to(user.room).emit('userList', { users: usersInNewRoom });
+
+                // Cập nhật danh sách phòng cho tất cả mọi người
+                const rooms = await getAllActiveRooms();
+                io.emit('roomList', { rooms });
+            }
         }
     });
 
@@ -138,10 +150,8 @@ io.on('connection', socket => {
     });
     // Listen for activity 
     socket.on('activity', async (name, userId) => {
-        console.log("userId ",userId);
         const user = await getUser(userId);
         const room = user ? user.room : null;
-        console.log("room ",room);
         
         if (room) {
             // Phát thông báo hoạt động đến phòng
@@ -155,7 +165,7 @@ io.on('connection', socket => {
 
 function buildMsg(name, text) {
     return {
-        name,
+        userName: name,
         text,
         time: new Intl.DateTimeFormat('default', {
             hour: 'numeric',
@@ -170,9 +180,11 @@ function buildMsg(name, text) {
 // Activate a user and save to MongoDB
 async function activateUser(userId, name, room) {
     console.log("userId, name, room:", userId, name, room);
-    const user = { userId, name, room };
+    const user = { name, room };
 
     try {
+        console.log("userId, name ",userId, name);
+        
         const updatedUser = await User.findOneAndUpdate(
             { userId, name },
             user,
